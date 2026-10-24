@@ -1,0 +1,44 @@
+name: Build RBF
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      # Private-repo runners have 7 GB of RAM; the fitter on this design can want more.
+      - name: Add swap
+        run: |
+          sudo swapoff -a || true
+          sudo fallocate -l 12G /swapfile2
+          sudo chmod 600 /swapfile2
+          sudo mkswap /swapfile2
+          sudo swapon /swapfile2
+          free -h
+
+      - name: Compile with Quartus 17.0.2 Lite
+        run: |
+          docker run --rm -v "$PWD":/build -w /build/core \
+            theypsilon/quartus-lite-c5:17.0.2.docker0 \
+            bash -lc 'Q=$(command -v quartus_sh || find / -name quartus_sh -type f 2>/dev/null | head -1); echo "using $Q"; "$Q" --flow compile MegaCD'
+
+      - name: Timing summary
+        if: always()
+        run: |
+          cat core/output_files/MegaCD.sta.summary 2>/dev/null || true
+          grep -A4 -i "worst-case" core/output_files/MegaCD.sta.rpt 2>/dev/null | head -60 || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: MegaCD-rbf
+          path: |
+            core/output_files/MegaCD.rbf
+            core/output_files/*.summary
+            core/output_files/*.rpt
+          if-no-files-found: warn
